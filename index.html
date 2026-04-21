@@ -9,21 +9,22 @@
   <!-- Firebase SDKs (Modular v9+) -->
   <script type="module">
     // Import Firebase modules
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-app.js";
+    import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-firestore.js";
 
     // ------------------- FIREBASE CONFIGURATION -------------------
     // NOTE: Replace this config object with your own Firebase project settings.
     // For demo purposes, this uses a public test project (no real data guaranteed).
     // To use your own: create a Firebase project, enable Firestore, and paste your config.
 const firebaseConfig = {
-  apiKey: "AIzaSyBXJoduS6boZ5ZdN8Ox2kpj3F7pYClU-V4",
-  authDomain: "ordolexis-3c1d0.firebaseapp.com",
-  projectId: "ordolexis-3c1d0",
-  storageBucket: "ordolexis-3c1d0.firebasestorage.app",
-  messagingSenderId: "965895446236",
-  appId: "1:965895446236:web:3f5da3a52541eb2baa5e19",
-  measurementId: "G-P74WK45LLT"
+  apiKey: "AIzaSyDgCSWeI5U_0ICpt74LZSBYTGOxjCiZ_rY",
+  authDomain: "kcpeventattendance-ed928.firebaseapp.com",
+  databaseURL: "https://kcpeventattendance-ed928-default-rtdb.firebaseio.com",
+  projectId: "kcpeventattendance-ed928",
+  storageBucket: "kcpeventattendance-ed928.firebasestorage.app",
+  messagingSenderId: "883832899509",
+  appId: "1:883832899509:web:1eb87d43b7f08d00347bfc",
+  measurementId: "G-5DML247JQW"
 };
     // IMPORTANT: For this demo to work fully, you must replace the config above with YOUR Firebase project credentials.
     // The demo config will cause Firestore permission errors unless you set up proper rules.
