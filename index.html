@@ -3,30 +3,25 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-  <title>Clucky Viewer - Chicken Flock Display (Read Only)</title>
+  <title>Clucky Viewer — Minimal Flock Display</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
   <!-- Firebase SDKs (Modular v9+) -->
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-app.js";
-    import { getFirestore, collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-firestore.js";
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-app.js";
+    import { getFirestore, collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-firestore.js";
 
     // ------------------- FIREBASE CONFIGURATION -------------------
-    // IMPORTANT: Replace this with YOUR Firebase project credentials.
-    // For the viewer to work, your Firebase security rules should allow read access.
-    // For demo/testing, use your own config (same as the main tracker app).
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-  apiKey: "AIzaSyDgCSWeI5U_0ICpt74LZSBYTGOxjCiZ_rY",
-  authDomain: "kcpeventattendance-ed928.firebaseapp.com",
-  databaseURL: "https://kcpeventattendance-ed928-default-rtdb.firebaseio.com",
-  projectId: "kcpeventattendance-ed928",
-  storageBucket: "kcpeventattendance-ed928.firebasestorage.app",
-  messagingSenderId: "883832899509",
-  appId: "1:883832899509:web:1eb87d43b7f08d00347bfc",
-  measurementId: "G-5DML247JQW"
-};
+    const firebaseConfig = {
+      apiKey: "AIzaSyDgCSWeI5U_0ICpt74LZSBYTGOxjCiZ_rY",
+      authDomain: "kcpeventattendance-ed928.firebaseapp.com",
+      databaseURL: "https://kcpeventattendance-ed928-default-rtdb.firebaseio.com",
+      projectId: "kcpeventattendance-ed928",
+      storageBucket: "kcpeventattendance-ed928.firebasestorage.app",
+      messagingSenderId: "883832899509",
+      appId: "1:883832899509:web:1eb87d43b7f08d00347bfc",
+      measurementId: "G-5DML247JQW"
+    };
     
-    // Initialize Firebase
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     const chickensCollection = collection(db, "chickens");
@@ -37,21 +32,34 @@ const firebaseConfig = {
     const emptyStateDiv = document.getElementById("emptyState");
     const errorStateDiv = document.getElementById("errorState");
     const flockCountSpan = document.getElementById("flockCount");
+    const filteredCountSpan = document.getElementById("filteredCount");
     const refreshBtn = document.getElementById("refreshBtn");
+    
+    // Filter elements
+    const breedFilter = document.getElementById("breedFilter");
+    const colorFilter = document.getElementById("colorFilter");
+    const ageFilter = document.getElementById("ageFilter");
+    const searchInput = document.getElementById("searchInput");
+    const applyFiltersBtn = document.getElementById("applyFilters");
+    const resetFiltersBtn = document.getElementById("resetFilters");
+    const filterBadge = document.getElementById("filterBadge");
 
-    // Helper: Format date nicely
+    // State
+    let allChickens = [];
+    let activeFilters = { breed: "", color: "", age: "", search: "" };
+
+    // Helper Functions
     function formatDate(dateString) {
-      if (!dateString) return "Not recorded";
+      if (!dateString) return null;
       try {
         const date = new Date(dateString);
-        return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+        return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
       } catch(e) {
         return dateString;
       }
     }
 
-    // Calculate age from birthdate (years, months, days)
-    function calculateAge(birthdateString) {
+    function calculateAgeInfo(birthdateString) {
       if (!birthdateString) return null;
       const birthDate = new Date(birthdateString);
       const today = new Date();
@@ -69,20 +77,25 @@ const firebaseConfig = {
         months += 12;
       }
       
-      if (years > 0) return `${years} year${years !== 1 ? 's' : ''} ${months} month${months !== 1 ? 's' : ''}`;
-      if (months > 0) return `${months} month${months !== 1 ? 's' : ''} ${days} day${days !== 1 ? 's' : ''}`;
-      return `${days} day${days !== 1 ? 's' : ''}`;
+      let category = "unknown";
+      if (years > 0) category = "adult";
+      else if (months >= 6) category = "juvenile";
+      else if (months > 0) category = "chick";
+      else category = "chick";
+      
+      let text = "";
+      if (years > 0) text = `${years}y ${months}m`;
+      else if (months > 0) text = `${months}m ${days}d`;
+      else text = `${days}d`;
+      
+      return { text, category };
     }
 
-    // Get a fun age emoji based on age range
-    function getAgeEmoji(ageText) {
-      if (!ageText) return "🐣";
-      if (ageText.includes('year') || (ageText.includes('month') && parseInt(ageText) > 6)) return "🐓";
-      if (ageText.includes('month') && parseInt(ageText) <= 6) return "🐤";
-      return "🥚";
+    function getAgeCategory(birthdate) {
+      const info = calculateAgeInfo(birthdate);
+      return info ? info.category : "unknown";
     }
 
-    // Escape HTML to prevent injection
     function escapeHtml(str) {
       if (!str) return "";
       return str.replace(/[&<>]/g, function(m) {
@@ -93,9 +106,97 @@ const firebaseConfig = {
       });
     }
 
-    // Load and display all chickens (read-only)
-    async function loadAndDisplayChickens() {
-      // Show loading, hide other states
+    // Extract unique filter options
+    function updateFilterOptions(chickens) {
+      const breeds = new Set();
+      const colors = new Set();
+      chickens.forEach(c => {
+        if (c.breed && c.breed.trim()) breeds.add(c.breed);
+        if (c.color && c.color.trim()) colors.add(c.color);
+      });
+      
+      breedFilter.innerHTML = '<option value="">All breeds</option>';
+      Array.from(breeds).sort().forEach(breed => {
+        breedFilter.innerHTML += `<option value="${escapeHtml(breed)}">${escapeHtml(breed)}</option>`;
+      });
+      
+      colorFilter.innerHTML = '<option value="">All colors</option>';
+      Array.from(colors).sort().forEach(color => {
+        colorFilter.innerHTML += `<option value="${escapeHtml(color)}">${escapeHtml(color)}</option>`;
+      });
+    }
+
+    // Apply all filters
+    function filterChickens() {
+      let filtered = [...allChickens];
+      
+      if (activeFilters.breed) {
+        filtered = filtered.filter(c => c.breed === activeFilters.breed);
+      }
+      if (activeFilters.color) {
+        filtered = filtered.filter(c => c.color === activeFilters.color);
+      }
+      if (activeFilters.age) {
+        filtered = filtered.filter(c => getAgeCategory(c.birthdate) === activeFilters.age);
+      }
+      if (activeFilters.search) {
+        const searchLower = activeFilters.search.toLowerCase();
+        filtered = filtered.filter(c => 
+          (c.name && c.name.toLowerCase().includes(searchLower)) ||
+          (c.chickenId && c.chickenId.toLowerCase().includes(searchLower)) ||
+          (c.breed && c.breed.toLowerCase().includes(searchLower))
+        );
+      }
+      
+      filteredCountSpan.textContent = filtered.length;
+      renderChickenCards(filtered);
+      
+      // Update filter badge visibility
+      const hasFilters = activeFilters.breed || activeFilters.color || activeFilters.age || activeFilters.search;
+      filterBadge.style.opacity = hasFilters ? "1" : "0.3";
+    }
+
+    function renderChickenCards(chickens) {
+      if (!chickens.length) {
+        chickenGrid.innerHTML = `<div class="empty-filter-result">✨ No chickens match the current filters</div>`;
+        return;
+      }
+      
+      chickenGrid.innerHTML = chickens.map(chicken => {
+        const birthdateRaw = chicken.birthdate || null;
+        const formattedBirthdate = formatDate(birthdateRaw);
+        const ageInfo = calculateAgeInfo(birthdateRaw);
+        const ageText = ageInfo ? ageInfo.text : null;
+        
+        let ageBadge = "";
+        if (ageText) {
+          const emoji = ageInfo.category === "adult" ? "🐓" : (ageInfo.category === "juvenile" ? "🐤" : "🐣");
+          ageBadge = `<span class="age-mini">${emoji} ${ageText}</span>`;
+        }
+        
+        return `
+          <div class="chicken-card" data-id="${chicken.id}">
+            <div class="card-header">
+              <div class="card-title">
+                <h3>${escapeHtml(chicken.name || 'Unnamed')}</h3>
+                <span class="card-id">${escapeHtml(chicken.chickenId || '—')}</span>
+                ${ageBadge}
+              </div>
+            </div>
+            <div class="card-details">
+              ${chicken.breed ? `<div class="detail-chip"><span class="chip-icon">🧬</span>${escapeHtml(chicken.breed)}</div>` : ''}
+              ${formattedBirthdate ? `<div class="detail-chip"><span class="chip-icon">📅</span>${formattedBirthdate}</div>` : ''}
+              ${chicken.color ? `<div class="detail-chip"><span class="chip-icon">🎨</span>${escapeHtml(chicken.color)}</div>` : ''}
+              ${chicken.weight ? `<div class="detail-chip"><span class="chip-icon">⚖️</span>${chicken.weight} kg</div>` : ''}
+              ${chicken.height ? `<div class="detail-chip"><span class="chip-icon">📏</span>${chicken.height} cm</div>` : ''}
+            </div>
+            ${chicken.notes ? `<div class="card-notes">📝 ${escapeHtml(chicken.notes)}</div>` : ''}
+          </div>
+        `;
+      }).join("");
+    }
+
+    async function loadChickens() {
       loadingIndicator.style.display = "flex";
       emptyStateDiv.style.display = "none";
       errorStateDiv.style.display = "none";
@@ -104,101 +205,23 @@ const firebaseConfig = {
       try {
         const q = query(chickensCollection, orderBy("name", "asc"));
         const querySnapshot = await getDocs(q);
-        const chickens = [];
+        allChickens = [];
         querySnapshot.forEach((doc) => {
-          chickens.push({ id: doc.id, ...doc.data() });
+          allChickens.push({ id: doc.id, ...doc.data() });
         });
 
-        // Update flock count
-        flockCountSpan.textContent = chickens.length;
-
-        if (chickens.length === 0) {
+        flockCountSpan.textContent = allChickens.length;
+        updateFilterOptions(allChickens);
+        
+        if (allChickens.length === 0) {
           emptyStateDiv.style.display = "block";
           loadingIndicator.style.display = "none";
+          filteredCountSpan.textContent = "0";
           return;
         }
-
-        // Render each chicken as a beautiful card
-        chickenGrid.innerHTML = chickens.map(chicken => {
-          const birthdateRaw = chicken.birthdate || null;
-          const formattedBirthdate = formatDate(birthdateRaw);
-          const ageString = birthdateRaw ? calculateAge(birthdateRaw) : null;
-          const ageEmoji = ageString ? getAgeEmoji(ageString) : "🐣";
-          
-          // Build additional info rows dynamically
-          const hasNotes = chicken.notes && chicken.notes.trim().length > 0;
-          
-          return `
-            <div class="chicken-card" data-id="${chicken.id}">
-              <div class="card-badge">
-                <span class="badge-icon">🐔</span>
-                <span class="chicken-tag">#${escapeHtml(chicken.chickenId || 'No ID')}</span>
-              </div>
-              <div class="card-inner">
-                <div class="card-header-area">
-                  <h2 class="chicken-name">${escapeHtml(chicken.name || 'Unnamed')}</h2>
-                  ${chicken.breed ? `<div class="breed-chip">${escapeHtml(chicken.breed)}</div>` : ''}
-                </div>
-                
-                <div class="details-grid">
-                  ${chicken.breed ? `
-                    <div class="detail-item">
-                      <div class="detail-icon">🧬</div>
-                      <div class="detail-content">
-                        <div class="detail-label">Breed</div>
-                        <div class="detail-value">${escapeHtml(chicken.breed)}</div>
-                      </div>
-                    </div>
-                  ` : ''}
-                  
-                  ${birthdateRaw ? `
-                    <div class="detail-item">
-                      <div class="detail-icon">📅</div>
-                      <div class="detail-content">
-                        <div class="detail-label">Birthdate</div>
-                        <div class="detail-value">${formattedBirthdate}</div>
-                        ${ageString ? `<div class="detail-sub">${ageEmoji} ${ageString} old</div>` : ''}
-                      </div>
-                    </div>
-                  ` : `
-                    <div class="detail-item">
-                      <div class="detail-icon">📅</div>
-                      <div class="detail-content">
-                        <div class="detail-label">Birthdate</div>
-                        <div class="detail-value muted">Not recorded</div>
-                      </div>
-                    </div>
-                  `}
-                  
-                  ${chicken.color ? `
-                    <div class="detail-item">
-                      <div class="detail-icon">🎨</div>
-                      <div class="detail-content">
-                        <div class="detail-label">Color / Markings</div>
-                        <div class="detail-value">${escapeHtml(chicken.color)}</div>
-                      </div>
-                    </div>
-                  ` : ''}
-                  
-                  ${chicken.notes ? `
-                    <div class="detail-item full-width">
-                      <div class="detail-icon">📝</div>
-                      <div class="detail-content">
-                        <div class="detail-label">Notes & Personality</div>
-                        <div class="detail-value notes-text">${escapeHtml(chicken.notes)}</div>
-                      </div>
-                    </div>
-                  ` : ''}
-                </div>
-                
-                <div class="card-footer-meta">
-                  <span class="meta-icon">🐾</span> Added to digital coop
-                </div>
-              </div>
-            </div>
-          `;
-        }).join("");
-
+        
+        // Apply current filters
+        filterChickens();
         loadingIndicator.style.display = "none";
       } catch (error) {
         console.error("Firebase read error:", error);
@@ -207,13 +230,8 @@ const firebaseConfig = {
         errorStateDiv.innerHTML = `
           <div class="error-content">
             <span class="error-icon">⚠️</span>
-            <h3>Unable to load flock data</h3>
-            <p>Could not connect to the chicken database. Please ensure:</p>
-            <ul>
-              <li>Firebase configuration is correct (replace with your project credentials)</li>
-              <li>Firestore security rules allow read access</li>
-              <li>You have added chickens using the Tracker app</li>
-            </ul>
+            <h3>Unable to connect</h3>
+            <p>Could not load flock data from Firebase.</p>
             <p class="error-detail">${escapeHtml(error.message)}</p>
             <button onclick="location.reload()" class="retry-btn">⟳ Retry</button>
           </div>
@@ -221,13 +239,37 @@ const firebaseConfig = {
       }
     }
 
-    // Refresh button event
-    refreshBtn.addEventListener("click", () => {
-      loadAndDisplayChickens();
+    // Event Handlers for Filters
+    function handleApplyFilters() {
+      activeFilters = {
+        breed: breedFilter.value,
+        color: colorFilter.value,
+        age: ageFilter.value,
+        search: searchInput.value.trim()
+      };
+      filterChickens();
+    }
+
+    function handleResetFilters() {
+      breedFilter.value = "";
+      colorFilter.value = "";
+      ageFilter.value = "";
+      searchInput.value = "";
+      activeFilters = { breed: "", color: "", age: "", search: "" };
+      filterChickens();
+    }
+
+    // Search on enter
+    searchInput.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") handleApplyFilters();
     });
 
+    applyFiltersBtn.addEventListener("click", handleApplyFilters);
+    resetFiltersBtn.addEventListener("click", handleResetFilters);
+    refreshBtn.addEventListener("click", () => loadChickens());
+
     // Initial load
-    loadAndDisplayChickens();
+    loadChickens();
   </script>
 
   <style>
@@ -239,358 +281,373 @@ const firebaseConfig = {
 
     body {
       font-family: 'Inter', sans-serif;
-      background: linear-gradient(135deg, #fdf8ed 0%, #fff7e8 100%);
-      color: #3d2a1c;
+      background: #f7f5f0;
+      color: #2c241a;
       padding: 2rem 1.5rem;
       min-height: 100vh;
     }
 
-    /* Main container */
     .viewer-container {
-      max-width: 1400px;
+      max-width: 1200px;
       margin: 0 auto;
     }
 
-    /* Header styling - no inputs, only info */
+    /* Minimal Header */
     .viewer-header {
       text-align: center;
-      margin-bottom: 2.5rem;
+      margin-bottom: 2rem;
     }
 
     .title-section {
       display: inline-flex;
-      align-items: center;
-      gap: 12px;
-      background: white;
-      padding: 0.8rem 2rem;
-      border-radius: 100px;
-      box-shadow: 0 6px 14px rgba(0,0,0,0.05);
-      margin-bottom: 1rem;
+      align-items: baseline;
+      gap: 8px;
     }
 
     .title-section h1 {
       font-size: 2rem;
-      background: linear-gradient(135deg, #d45a1a, #f39c12);
+      font-weight: 600;
+      color: #d seventeen;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, #c26a2e, #e8923a);
       -webkit-background-clip: text;
       background-clip: text;
       color: transparent;
-      letter-spacing: -0.3px;
     }
 
     .title-icon {
-      font-size: 2.2rem;
+      font-size: 1.8rem;
     }
 
     .flock-stats {
       display: flex;
       justify-content: center;
-      gap: 2rem;
+      align-items: center;
+      gap: 1rem;
       flex-wrap: wrap;
       margin-top: 0.8rem;
     }
 
     .stat-badge {
-      background: rgba(255,245,225,0.9);
-      backdrop-filter: blur(4px);
-      padding: 0.5rem 1.2rem;
-      border-radius: 60px;
+      background: white;
+      padding: 0.35rem 1rem;
+      border-radius: 40px;
+      font-size: 0.85rem;
       font-weight: 500;
-      font-size: 0.9rem;
-      color: #aa6f3c;
-      border: 1px solid #ffe1b3;
+      color: #b sixteen;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
       display: inline-flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
     }
 
     .refresh-btn {
-      background: #f7e5d0;
-      border: none;
-      padding: 0.5rem 1.2rem;
+      background: white;
+      border: 1px solid #e8e0d0;
+      padding: 0.35rem 1rem;
       border-radius: 40px;
-      font-weight: 600;
-      font-size: 0.85rem;
+      font-size: 0.8rem;
       cursor: pointer;
-      transition: 0.2s;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      color: #8b5a36;
+      transition: all 0.2s;
+      color: #7a5a3a;
     }
 
     .refresh-btn:hover {
-      background: #f0ddc2;
-      transform: scale(0.98);
+      background: #f0ebe2;
+      border-color: #d4c4ac;
     }
 
-    /* Grid layout for chicken cards */
-    .chicken-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-      gap: 1.8rem;
-      margin-top: 1rem;
-    }
-
-    /* Chicken Card - read only, beautiful design */
-    .chicken-card {
+    /* Minimal Filter Bar */
+    .filter-section {
       background: white;
-      border-radius: 2rem;
-      overflow: hidden;
-      transition: all 0.3s cubic-bezier(0.2, 0.9, 0.4, 1.1);
-      box-shadow: 0 12px 24px -8px rgba(0, 0, 0, 0.08);
-      border: 1px solid #ffefcf;
-      position: relative;
+      border-radius: 20px;
+      padding: 1.2rem 1.5rem;
+      margin-bottom: 1.8rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+      border: 1px solid #ede6db;
     }
 
-    .chicken-card:hover {
-      transform: translateY(-5px);
-      box-shadow: 0 20px 30px -12px rgba(0, 0, 0, 0.15);
-      border-color: #f7cf9a;
-    }
-
-    .card-badge {
-      background: linear-gradient(95deg, #ffedd5, #fff3e0);
-      padding: 0.6rem 1.2rem;
+    .filter-row {
       display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 2px solid #ffdfb0;
+      flex-wrap: wrap;
+      gap: 0.8rem;
+      align-items: flex-end;
     }
 
-    .badge-icon {
-      font-size: 1.6rem;
+    .filter-group {
+      flex: 1;
+      min-width: 120px;
     }
 
-    .chicken-tag {
-      background: #e9cba7;
-      padding: 0.2rem 0.8rem;
-      border-radius: 30px;
+    .filter-group label {
+      display: block;
       font-size: 0.7rem;
-      font-weight: 700;
-      color: #5a3a1e;
+      font-weight: 600;
+      color: #b17d4a;
+      margin-bottom: 4px;
       letter-spacing: 0.3px;
     }
 
-    .card-inner {
-      padding: 1.4rem 1.5rem 1.2rem;
+    .filter-group select, .filter-group input {
+      width: 100%;
+      padding: 8px 12px;
+      border-radius: 30px;
+      border: 1px solid #e2d8ca;
+      background: #fefcf8;
+      font-family: inherit;
+      font-size: 0.85rem;
+      transition: 0.2s;
     }
 
-    .card-header-area {
+    .filter-group select:focus, .filter-group input:focus {
+      outline: none;
+      border-color: #e8923a;
+    }
+
+    .filter-actions {
       display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      flex-wrap: wrap;
-      margin-bottom: 1.2rem;
       gap: 8px;
     }
 
-    .chicken-name {
-      font-size: 1.65rem;
-      font-weight: 800;
-      color: #4b2e17;
-      letter-spacing: -0.3px;
-      background: linear-gradient(135deg, #6b3f1c, #b6632a);
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
+    .filter-btn {
+      background: #f0ebe2;
+      border: none;
+      padding: 8px 18px;
+      border-radius: 30px;
+      font-weight: 500;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: 0.15s;
+      color: #5e4430;
     }
 
-    .breed-chip {
-      background: #f7e8d4;
-      padding: 0.25rem 0.9rem;
+    .filter-btn.primary {
+      background: #e8923a;
+      color: white;
+    }
+
+    .filter-btn.primary:hover {
+      background: #d47d2a;
+    }
+
+    .filter-btn:hover {
+      background: #e6dfd2;
+    }
+
+    .filter-stats-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 1rem;
+      padding-top: 0.8rem;
+      border-top: 1px solid #f0e8de;
+      font-size: 0.75rem;
+      color: #a9845c;
+    }
+
+    .filter-badge {
+      background: #f3ede5;
+      padding: 3px 10px;
       border-radius: 30px;
       font-size: 0.7rem;
-      font-weight: 600;
-      color: #c2773a;
-    }
-
-    .details-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: 1rem;
-      margin: 1.2rem 0 1rem;
-    }
-
-    .detail-item {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      background: #fefaf4;
-      padding: 0.7rem 0.9rem;
-      border-radius: 1.2rem;
-      transition: 0.1s;
-    }
-
-    .detail-item.full-width {
-      grid-column: 1 / -1;
-    }
-
-    .detail-icon {
-      font-size: 1.3rem;
-      opacity: 0.8;
-    }
-
-    .detail-content {
-      flex: 1;
-    }
-
-    .detail-label {
-      font-size: 0.7rem;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      font-weight: 700;
-      color: #c58f55;
-      margin-bottom: 4px;
-    }
-
-    .detail-value {
-      font-weight: 600;
-      color: #4f351d;
-      font-size: 0.9rem;
-      word-break: break-word;
-    }
-
-    .detail-sub {
-      font-size: 0.7rem;
-      color: #b67b44;
-      margin-top: 4px;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .notes-text {
-      font-style: italic;
-      line-height: 1.4;
       font-weight: 500;
-      color: #6d4c2c;
     }
 
-    .muted {
-      color: #b4987a;
-      font-weight: 400;
+    /* Minimal Chicken Cards */
+    .chicken-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 1.2rem;
     }
 
-    .card-footer-meta {
-      margin-top: 1rem;
-      padding-top: 0.7rem;
-      border-top: 1px dashed #f3dfc0;
-      font-size: 0.7rem;
-      color: #bb8f60;
-      display: flex;
-      align-items: center;
-      gap: 6px;
+    .chicken-card {
+      background: white;
+      border-radius: 18px;
+      padding: 1.2rem;
+      transition: all 0.2s ease;
+      border: 1px solid #efe6db;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.02);
     }
 
-    /* Loading, empty, error states */
-    .loading-state, .empty-state, .error-state {
-      text-align: center;
-      padding: 3rem 1.5rem;
-      background: #fffcf5;
-      border-radius: 2rem;
-      margin: 2rem 0;
+    .chicken-card:hover {
+      border-color: #e0d2c0;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+      transform: translateY(-1px);
     }
 
-    .spinner {
-      width: 42px;
-      height: 42px;
-      border: 4px solid #ffe0b9;
-      border-top: 4px solid #e67e22;
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-      margin: 0 auto 1rem;
-    }
-
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-
-    .empty-icon {
-      font-size: 4rem;
+    .card-header {
       margin-bottom: 0.8rem;
     }
 
-    .empty-state h3, .error-state h3 {
-      color: #a27141;
+    .card-title {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .card-title h3 {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: #3b2a1c;
+      letter-spacing: -0.2px;
+    }
+
+    .card-id {
+      background: #f3ede5;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 0.65rem;
+      font-weight: 600;
+      color: #b sixteen;
+      font-family: monospace;
+    }
+
+    .age-mini {
+      background: #fef5e8;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 0.65rem;
+      font-weight: 500;
+      color: #c seventeen;
+    }
+
+    .card-details {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 0.8rem;
+    }
+
+    .detail-chip {
+      background: #faf7f2;
+      padding: 4px 10px;
+      border-radius: 30px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: #6e543a;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .chip-icon {
+      font-size: 0.8rem;
+      opacity: 0.7;
+    }
+
+    .card-notes {
+      background: #fefbf6;
+      padding: 8px 12px;
+      border-radius: 14px;
+      font-size: 0.75rem;
+      color: #8f6e48;
+      line-height: 1.4;
+      border-left: 3px solid #e2cfb5;
+      margin-top: 6px;
+    }
+
+    /* States */
+    .empty-state, .empty-filter-result {
+      text-align: center;
+      background: white;
+      border-radius: 24px;
+      padding: 3rem 1.5rem;
+      color: #b89a72;
+      border: 1px solid #efe6db;
+    }
+
+    .empty-icon {
+      font-size: 3rem;
       margin-bottom: 0.5rem;
     }
 
-    .empty-state p {
-      color: #b78d60;
+    .loading-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem;
+    }
+
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid #f0e0ce;
+      border-top: 3px solid #e8923a;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      margin-bottom: 0.8rem;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .error-state {
+      text-align: center;
+      padding: 2rem;
     }
 
     .error-content {
-      background: #fff1e6;
-      border-radius: 1.5rem;
-      padding: 1.8rem;
-      text-align: left;
-      max-width: 500px;
+      background: #fff7f0;
+      border-radius: 20px;
+      padding: 1.5rem;
+      max-width: 400px;
       margin: 0 auto;
     }
 
     .error-icon {
-      font-size: 2.2rem;
-      display: block;
-      text-align: center;
-    }
-
-    .error-content ul {
-      margin: 0.8rem 0 0.8rem 1.5rem;
-      color: #b46234;
+      font-size: 2rem;
     }
 
     .error-detail {
-      background: #fff0e4;
-      padding: 0.6rem;
+      background: #f8f0e8;
+      padding: 0.5rem;
       border-radius: 12px;
-      font-size: 0.75rem;
+      font-size: 0.7rem;
       font-family: monospace;
-      margin: 0.8rem 0;
+      margin-top: 0.8rem;
       word-break: break-word;
     }
 
     .retry-btn {
-      background: #e67e22;
+      background: #e8923a;
       border: none;
+      padding: 0.5rem 1.2rem;
+      border-radius: 30px;
       color: white;
-      padding: 0.6rem 1.4rem;
-      border-radius: 40px;
-      font-weight: bold;
+      font-weight: 600;
       cursor: pointer;
-      margin-top: 0.5rem;
+      margin-top: 1rem;
     }
 
-    /* Responsive */
-    @media (max-width: 680px) {
+    .viewer-footer {
+      text-align: center;
+      margin-top: 2.5rem;
+      padding-top: 1.2rem;
+      font-size: 0.7rem;
+      color: #c0a078;
+      border-top: 1px solid #efe6db;
+    }
+
+    @media (max-width: 640px) {
       body {
         padding: 1rem;
+      }
+      .filter-row {
+        flex-direction: column;
+      }
+      .filter-actions {
+        width: 100%;
+      }
+      .filter-btn {
+        flex: 1;
+        text-align: center;
       }
       .chicken-grid {
         grid-template-columns: 1fr;
       }
-      .title-section h1 {
-        font-size: 1.5rem;
-      }
-      .title-icon {
-        font-size: 1.6rem;
-      }
-    }
-
-    /* subtle watermark - viewer mode only */
-    .viewer-footer {
-      text-align: center;
-      margin-top: 3rem;
-      padding-top: 1.5rem;
-      font-size: 0.75rem;
-      color: #cfaa81;
-      border-top: 1px solid #ffe0bd;
-    }
-
-    .viewer-footer a {
-      color: #d18f47;
-      text-decoration: none;
-      font-weight: 500;
     }
   </style>
 </head>
@@ -598,20 +655,59 @@ const firebaseConfig = {
 <div class="viewer-container">
   <div class="viewer-header">
     <div class="title-section">
-      <span class="title-icon">🐓📋</span>
+      <span class="title-icon">🐔</span>
       <h1>Clucky Viewer</h1>
-      <span class="title-icon">👀</span>
     </div>
     <div class="flock-stats">
       <div class="stat-badge">
-        <span>🐔 Total Chickens</span>
+        <span>🐔 Total</span>
         <strong id="flockCount">0</strong>
       </div>
-      <button id="refreshBtn" class="refresh-btn">
-        🔄 Refresh Flock
-      </button>
+      <div class="stat-badge">
+        <span>🔍 Showing</span>
+        <strong id="filteredCount">0</strong>
+      </div>
+      <button id="refreshBtn" class="refresh-btn">⟳ Refresh</button>
     </div>
-    <p style="margin-top: 12px; font-size: 0.8rem; color: #bf8d5a;">📢 Read-only mode • All chicken details are displayed from the database</p>
+  </div>
+
+  <!-- Minimal Filter Section -->
+  <div class="filter-section">
+    <div class="filter-row">
+      <div class="filter-group">
+        <label>Breed</label>
+        <select id="breedFilter">
+          <option value="">All breeds</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Color</label>
+        <select id="colorFilter">
+          <option value="">All colors</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Age</label>
+        <select id="ageFilter">
+          <option value="">All ages</option>
+          <option value="chick">🐣 Chick (0-6 mo)</option>
+          <option value="juvenile">🐤 Juvenile (6-12 mo)</option>
+          <option value="adult">🐓 Adult (1+ yr)</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Search (name / ID)</label>
+        <input type="text" id="searchInput" placeholder="e.g., Henrietta">
+      </div>
+      <div class="filter-actions">
+        <button id="applyFilters" class="filter-btn primary">Apply</button>
+        <button id="resetFilters" class="filter-btn">Reset</button>
+      </div>
+    </div>
+    <div class="filter-stats-row">
+      <span>📋 Filters active</span>
+      <span id="filterBadge" class="filter-badge" style="opacity:0.3">⚡ none</span>
+    </div>
   </div>
 
   <!-- Chicken Grid -->
@@ -620,23 +716,21 @@ const firebaseConfig = {
   <!-- Loading State -->
   <div id="loadingIndicator" class="loading-state" style="display: none;">
     <div class="spinner"></div>
-    <p>🐣 Gathering the flock details...</p>
+    <p>Loading flock...</p>
   </div>
 
   <!-- Empty State -->
   <div id="emptyState" class="empty-state" style="display: none;">
-    <div class="empty-icon">🐤🥚</div>
-    <h3>No chickens registered yet</h3>
-    <p>Use the Chicken Tracker app to add chickens with birthdates, breed, and notes.</p>
-    <p style="margin-top: 0.5rem; font-size: 0.8rem;">Once added, they will appear here automatically.</p>
+    <div class="empty-icon">🐣</div>
+    <h3>No chickens yet</h3>
+    <p>Use the admin dashboard to add chickens with birthdates, weight, height & notes.</p>
   </div>
 
-  <!-- Error State (dynamic) -->
+  <!-- Error State -->
   <div id="errorState" class="error-state" style="display: none;"></div>
 
   <div class="viewer-footer">
-    🌾 <strong>View-Only Mode</strong> — See all chicken identification, birthdates, age, breed, color & notes. 
-    <br>Data powered by Firebase Firestore. 
+    🌾 Minimal viewer — Filter by breed, color, age or search. Data from Firebase.
   </div>
 </div>
 </body>
